@@ -6,6 +6,13 @@ import (
 	"net"
 )
 
+type SendFrom int
+
+const (
+	Local SendFrom = iota
+	Remote
+)
+
 // Proxy - Manages a Proxy connection, piping data between local and remote.
 type Proxy struct {
 	sentBytes     uint64
@@ -17,8 +24,8 @@ type Proxy struct {
 	tlsUnwrapp    bool
 	tlsAddress    string
 
-	Matcher  func([]byte)
-	Replacer func([]byte) []byte
+	Matcher  func([]byte, SendFrom)
+	Replacer func([]byte, SendFrom) []byte
 
 	// Settings
 	Nagles    bool
@@ -84,8 +91,8 @@ func (p *Proxy) Start() {
 	p.Log.Info("Opened %s >>> %s", p.laddr.String(), p.raddr.String())
 
 	//bidirectional copy
-	go p.pipe(p.lconn, p.rconn)
-	go p.pipe(p.rconn, p.lconn)
+	go p.pipe(p.lconn, p.rconn, Local)
+	go p.pipe(p.rconn, p.lconn, Remote)
 
 	//wait for close...
 	<-p.errsig
@@ -103,7 +110,7 @@ func (p *Proxy) err(s string, err error) {
 	p.erred = true
 }
 
-func (p *Proxy) pipe(src, dst io.ReadWriter) {
+func (p *Proxy) pipe(src, dst io.ReadWriter, dir SendFrom) {
 	islocal := src == p.lconn
 
 	var dataDirection string
@@ -132,12 +139,12 @@ func (p *Proxy) pipe(src, dst io.ReadWriter) {
 
 		//execute match
 		if p.Matcher != nil {
-			p.Matcher(b)
+			p.Matcher(b, dir)
 		}
 
 		//execute replace
 		if p.Replacer != nil {
-			b = p.Replacer(b)
+			b = p.Replacer(b, dir)
 		}
 
 		//show output
